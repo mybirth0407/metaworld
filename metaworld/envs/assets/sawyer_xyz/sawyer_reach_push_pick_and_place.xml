@@ -24,6 +24,9 @@
         <!-- place goal -->
         <site name="goal_pick_place" pos="0.1 0.8 0.2" size="0.02" 
               rgba="0 0 0.8 1"/>
+        <!-- pick goal -->
+        <site name="goal_pick" pos="0.1 0.8 0.2" size="0.02" 
+              rgba="0 0 0.8 1"/>
 
        
     </worldbody>

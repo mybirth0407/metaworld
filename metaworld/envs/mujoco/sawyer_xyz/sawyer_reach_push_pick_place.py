@@ -374,7 +374,9 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
         def compute_reward_pick_place(actions, obs, mode, place_or_not = True):
             reachDist = np.linalg.norm(objPos - fingerCOM)
             placingDist = np.linalg.norm(objPos - goal)
-            assert np.all(goal == self.get_site_pos('goal_pick_place'))
+
+            assert np.all(goal == self.get_site_pos('goal_pick_place')) if place_or_not \
+                else np.all(goal == self.get_site_pos('goal_pick'))
 
             def reachReward():
                 reachRew = -reachDist# + min(actions[-1], -1)/50
