@@ -17,7 +17,7 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
     def __init__(
             self,
             random_init=False,
-            task_types=['pick_place', 'reach', 'push'],
+            task_types=['pick_place', 'reach', 'push', 'pick'],
             task_type='pick_place',
             obs_type='plain',
             goal_low=(-0.1, 0.8, 0.05),
@@ -59,6 +59,8 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
             self.goal = np.array([-0.1, 0.8, 0.2])
         elif self.task_type == 'push':
             self.goal = np.array([0.1, 0.8, 0.02])
+        elif self.task_type == 'pick':
+            self.goal = np.array([0, 0, 0])
         else:
             raise NotImplementedError
         self.obj_init_angle = self.init_config['obj_init_angle']
@@ -160,6 +162,8 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
         goal_dist = placingDist if self.task_type == 'pick_place' else pushDist
         if self.task_type == 'reach':
             success = float(reachDist <= 0.05)
+        elif self.task_type == 'pick':
+            success = self.pickCompleted
         else:
             success = float(goal_dist <= 0.07)
         info = {'reachDist': reachDist, 'pickRew':pickRew, 'epRew' : reward, 'goalDist': goal_dist, 'success': success}
@@ -367,7 +371,7 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
             reward = reachRew + pushRew
             return [reward, reachRew, reachDist, pushRew, pushDist, None, None, None]
 
-        def compute_reward_pick_place(actions, obs, mode):
+        def compute_reward_pick_place(actions, obs, mode, place_or_not = True):
             reachDist = np.linalg.norm(objPos - fingerCOM)
             placingDist = np.linalg.norm(objPos - goal)
             assert np.all(goal == self.get_site_pos('goal_pick_place'))
@@ -447,14 +451,18 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
                 pickRew = orig_pickReward()
             placeRew , placingDist = placeReward()
             assert ((placeRew >=0) and (pickRew>=0))
-            reward = reachRew + pickRew + placeRew
+            reward = reachRew + pickRew
+            if place_or_not:
+                reward += placeRew
             return [reward, reachRew, reachDist, None, None, pickRew, placeRew, placingDist]
         if task_type == 'reach':
             return compute_reward_reach(actions, obs, mode)
         elif task_type == 'push':
             return compute_reward_push(actions, obs, mode)
+        elif task_type == 'pick':
+            return compute_reward_pick_place(actions, obs, mode, False)
         else:
-            return compute_reward_pick_place(actions, obs, mode)
+            return compute_reward_pick_place(actions, obs, mode, True)
 
     def get_diagnostics(self, paths, prefix=''):
         statistics = OrderedDict()
