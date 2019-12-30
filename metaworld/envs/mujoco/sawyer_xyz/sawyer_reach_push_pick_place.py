@@ -292,6 +292,7 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
         #self._set_obj_xyz_quat(self.obj_init_pos, self.obj_init_angle)
         self.curr_path_length = 0
         self.maxReachDist = np.linalg.norm(self.init_fingerCOM - np.array(self._state_goal))
+        self.maxPickDist = np.linalg.norm(self.init_fingerCOM - np.array(self.obj_init_pos))
         self.maxPushDist = np.linalg.norm(self.obj_init_pos[:2] - np.array(self._state_goal)[:2])
         self.maxPlacingDist = np.linalg.norm(np.array([self.obj_init_pos[0], self.obj_init_pos[1], self.heightTarget]) - np.array(self._state_goal)) + self.heightTarget
         self.target_rewards = [1000*self.maxPlacingDist + 1000*2, 1000*self.maxReachDist + 1000*2, 1000*self.maxPushDist + 1000*2]
@@ -371,12 +372,11 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
             reward = reachRew + pushRew
             return [reward, reachRew, reachDist, pushRew, pushDist, None, None, None]
 
-        def compute_reward_pick_place(actions, obs, mode, place_or_not = True):
+        def compute_reward_pick_place(actions, obs, mode):
             reachDist = np.linalg.norm(objPos - fingerCOM)
             placingDist = np.linalg.norm(objPos - goal)
 
-            assert np.all(goal == self.get_site_pos('goal_pick_place')) if place_or_not \
-                else np.all(goal == self.get_site_pos('goal_pick'))
+            assert np.all(goal == self.get_site_pos('goal_pick_place'))
 
             def reachReward():
                 reachRew = -reachDist# + min(actions[-1], -1)/50
@@ -453,18 +453,85 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
                 pickRew = orig_pickReward()
             placeRew , placingDist = placeReward()
             assert ((placeRew >=0) and (pickRew>=0))
-            reward = reachRew + pickRew
-            if place_or_not:
-                reward += placeRew
+            reward = reachRew + pickRew + placeRew
             return [reward, reachRew, reachDist, None, None, pickRew, placeRew, placingDist]
+
+        def compute_reward_pick(actions, obs, mode):
+            reachDist = np.linalg.norm(objPos - fingerCOM)
+
+            assert np.all(goal == self.get_site_pos('goal_pick'))
+
+            def reachReward():
+                reachRew = -reachDist# + min(actions[-1], -1)/50
+                reachDistxy = np.linalg.norm(objPos[:-1] - fingerCOM[:-1])
+                zRew = np.linalg.norm(fingerCOM[-1] - self.init_fingerCOM[-1])
+                if reachDistxy < 0.05: #0.02
+                    reachRew = -reachDist
+                else:
+                    reachRew =  -reachDistxy - 2*zRew
+                #incentive to close fingers when reachDist is small
+                if reachDist < 0.05:
+                    reachRew = -reachDist + max(actions[-1],0)/50
+                return reachRew , reachDist
+
+            def pickCompletionCriteria():
+                tolerance = 0.01
+                if objPos[2] >= (heightTarget- tolerance):
+                    return True
+                else:
+                    return False
+
+            if pickCompletionCriteria():
+                self.pickCompleted = True
+
+            def objDropped():
+                return (objPos[2] < (self.objHeight + 0.005)) and (reachDist > 0.02) 
+                # Object on the ground, far away from the goal, and from the gripper
+                #Can tweak the margin limits
+           
+            def objGrasped(thresh = 0):
+                sensorData = self.data.sensordata
+                return (sensorData[0]>thresh) and (sensorData[1]> thresh)
+
+            def orig_pickReward():       
+                # hScale = 50
+                hScale = 100
+                # hScale = 1000
+                if self.pickCompleted and not(objDropped()):
+                    return hScale*heightTarget
+                # elif (reachDist < 0.1) and (objPos[2]> (self.objHeight + 0.005)) :
+                elif (reachDist < 0.1) and (objPos[2]> (self.objHeight + 0.005)) :
+                    return hScale* min(heightTarget, objPos[2])
+                else:
+                    return 0
+
+            def general_pickReward():
+                hScale = 50
+                if self.pickCompleted and objGrasped():
+                    return hScale*heightTarget
+                elif objGrasped() and (objPos[2]> (self.objHeight + 0.005)):
+                    return hScale* min(heightTarget, objPos[2])
+                else:
+                    return 0
+
+            reachRew, reachDist = reachReward()
+            if mode == 'general':
+                pickRew = general_pickReward()
+            else:
+                pickRew = orig_pickReward()
+            assert (pickRew>=0)
+            c_large = 100
+            reward = c_large * (reachRew + pickRew)
+            return [reward, reachRew, reachDist, None, None, pickRew, None, None]
+
         if task_type == 'reach':
             return compute_reward_reach(actions, obs, mode)
         elif task_type == 'push':
             return compute_reward_push(actions, obs, mode)
         elif task_type == 'pick':
-            return compute_reward_pick_place(actions, obs, mode, False)
+            return compute_reward_pick(actions, obs, mode)
         else:
-            return compute_reward_pick_place(actions, obs, mode, True)
+            return compute_reward_pick_place(actions, obs, mode)
 
     def get_diagnostics(self, paths, prefix=''):
         statistics = OrderedDict()
