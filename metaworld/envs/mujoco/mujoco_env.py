@@ -80,7 +80,8 @@ class MujocoEnv(gym.Env):
 		Optionally implement this method, if you need to tinker with camera position
 		and so forth.
 		"""
-		pass
+		self.viewer.cam.azimuth = -20
+		self.viewer.cam.elevation = -20
 
 	# -----------------------------
 
@@ -132,9 +133,10 @@ class MujocoEnv(gym.Env):
 			self._get_viewer(mode).render()
 
 	def close(self):
-		if self.viewer is not None:
-			glfw.destroy_window(self.viewer.window)
-			self.viewer = None
+		pass
+		# if self.viewer is not None:
+		# 	glfw.destroy_window(self.viewer.window)
+		# 	self.viewer = None
 
 	def _get_viewer(self, mode):
 		self.viewer = self._viewers.get(mode)
