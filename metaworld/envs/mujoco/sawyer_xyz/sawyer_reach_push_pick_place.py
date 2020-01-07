@@ -69,6 +69,10 @@ class SawyerReachPushPickPlaceEnv(SawyerXYZEnv):
 
         assert obs_type in OBS_TYPE
         self.obs_type = obs_type
+        
+        if task_type == "pick":
+            goal_high = (0,0,0)
+            goal_low = (0,0,0)
 
         if goal_low is None:
             goal_low = self.hand_low
