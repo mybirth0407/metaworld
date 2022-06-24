@@ -144,6 +144,7 @@ class SawyerDrawerOpenEnv(SawyerXYZEnv):
         # objPos =  (self.data.get_geom_xpos('handle').copy() + self.data.get_geom_xpos('drawer_wall2').copy()) / 2
         objPos =  self.data.get_geom_xpos('handle').copy()
         flat_obs = np.concatenate((hand, objPos))
+
         if self.obs_type == 'with_goal_and_id':
             return np.concatenate([
                     flat_obs,
@@ -318,3 +319,163 @@ class SawyerDrawerOpenEnv(SawyerXYZEnv):
 
     def log_diagnostics(self, paths = None, logger = None):
         pass
+
+class SawyerDrawerOpenEnv2(SawyerDrawerOpenEnv):
+    def __init__(
+            self,
+            obs_type='with_goal',
+            random_init=False,
+            goal_low=None,
+            goal_high=None,
+            rotMode='fixed',
+            **kwargs
+    ):
+        self.quick_init(locals())
+        hand_low=(-0.5, 0.40, 0.05)
+        hand_high=(0.5, 1, 0.5)
+        obj_low=(-0.1, 0.9, 0.04)
+        obj_high=(0.1, 0.9, 0.04)
+        SawyerXYZEnv.__init__(
+            self,
+            frame_skip=5,
+            action_scale=1./100,
+            hand_low=hand_low,
+            hand_high=hand_high,
+            model_name=self.model_name,
+            **kwargs
+        )
+
+        self.init_config = {
+            'obj_init_angle': np.array([0.3, ], dtype=np.float32),
+            'obj_init_pos': np.array([0., 0.9, 0.04], dtype=np.float32),
+            'hand_init_pos': np.array([0, 0.6, 0.2], dtype=np.float32),
+        }
+
+        self.goal = np.array([0., 0.55, 0.04])
+
+        self.obj_init_pos = self.init_config['obj_init_pos']
+        self.obj_init_angle = self.init_config['obj_init_angle']
+        self.hand_init_pos = self.init_config['hand_init_pos']
+
+        if goal_low is None:
+            goal_low = self.hand_low
+        
+        if goal_high is None:
+            goal_high = self.hand_high
+        
+        assert obs_type in OBS_TYPE
+        self.obs_type = obs_type
+        self.random_init = random_init
+        self.max_path_length = 150
+        self.rotMode = rotMode
+        if rotMode == 'fixed':
+            self.action_space = Box(
+                np.array([-1, -1, -1, -1]),
+                np.array([1, 1, 1, 1]),
+            )
+        elif rotMode == 'rotz':
+            self.action_rot_scale = 1./50
+            self.action_space = Box(
+                np.array([-1, -1, -1, -np.pi, -1]),
+                np.array([1, 1, 1, np.pi, 1]),
+            )
+        elif rotMode == 'quat':
+            self.action_space = Box(
+                np.array([-1, -1, -1, 0, -1, -1, -1, -1]),
+                np.array([1, 1, 1, 2*np.pi, 1, 1, 1, 1]),
+            )
+        else:
+            self.action_space = Box(
+                np.array([-1, -1, -1, -np.pi/2, -np.pi/2, 0, -1]),
+                np.array([1, 1, 1, np.pi/2, np.pi/2, np.pi*2, 1]),
+            )
+        self.obj_and_goal_space = Box(
+            np.array(obj_low),
+            np.array(obj_high),
+        )
+        self.goal_space = Box(np.array(goal_low), np.array(goal_high))
+        if self.obs_type == 'plain':
+            self.observation_space = Box(
+                np.hstack((self.hand_low, obj_low,)),
+                np.hstack((self.hand_high, obj_high,)),
+            )
+        elif self.obs_type == 'with_goal':
+            self.observation_space = Box(
+                np.hstack((self.hand_low, obj_low, goal_low)),
+                np.hstack((self.hand_high, obj_high, goal_high)),
+            )
+        else:
+            raise NotImplementedError
+
+        self.embedding_dict = dict()
+        with open('glove.6B.50d.txt', encoding="utf8") as fp:
+            for line in fp:
+                word_vector = line.split()
+                word = word_vector[0]
+
+                word_vector_arr = np.asarray(word_vector[1:], dtype='float32')
+                self.embedding_dict[word] = word_vector_arr
+
+        self.reset()
+
+    def step(self, action):
+        if self.rotMode == 'euler':
+            action_ = np.zeros(7)
+            action_[:3] = action[:3]
+            action_[3:] = euler2quat(action[3:6])
+            self.set_xyz_action_rot(action_)
+        elif self.rotMode == 'fixed':
+            self.set_xyz_action(action[:3])
+        elif self.rotMode == 'rotz':
+            self.set_xyz_action_rotz(action[:4])
+        else:
+            self.set_xyz_action_rot(action[:7])
+        self.do_simulation([action[-1], -action[-1]])
+        # The marker seems to get reset every time you do a simulation
+        # self._set_goal_marker(np.array([0., self._state_goal, 0.05]))
+        self._set_goal_marker(self._state_goal)
+        ob = self._get_obs()
+        obs_dict = self._get_obs_dict()
+        reward, reachDist, pullDist = self.compute_reward(action, obs_dict)
+        self.curr_path_length +=1
+        #info = self._get_info()
+        if self.curr_path_length == self.max_path_length:
+            done = True
+        else:
+            done = False
+        info = {'reachDist': reachDist, 'goalDist': pullDist, 'epRew' : reward, 'pickRew':None, 'success': float(pullDist <= 0.08)}
+        info['goal'] = self.goal
+        return ob, reward, done, info
+
+    def _get_obs(self):
+        hand = self.get_endeff_pos()
+        # objPos =  (self.data.get_geom_xpos('handle').copy() + self.data.get_geom_xpos('drawer_wall2').copy()) / 2
+        objPos =  self.data.get_geom_xpos('handle').copy()
+        flat_obs = np.concatenate((hand, objPos))
+
+        self.task_onehot = np.zeros(shape=(10,), dtype=np.float32)
+        for tn in 'pick drawer'.split():
+            pooled = []
+            for i in range(10):
+                pooled.append(np.mean(self.embedding_dict[tn][i*5:(i+1)*5]))
+            # self.task_onehot += self.embedding_dict[tn]
+            self.task_onehot += np.array(pooled)
+        
+        return np.concatenate([
+                flat_obs,
+                self._state_goal,
+                self.task_onehot
+            ])
+
+    def _get_obs_dict(self):
+        hand = self.get_endeff_pos()
+        # objPos =  (self.data.get_geom_xpos('handle').copy() + self.data.get_geom_xpos('drawer_wall2').copy()) / 2
+        # objPos =  self.data.get_geom_xpos('handle').copy()
+        # objPos =  self.get_site_pos('handleStart')
+        objPos =  (self.get_site_pos('handleStart').copy() + self.data.get_geom_xpos('drawer_wall2').copy()) / 2
+        flat_obs = np.concatenate((hand, objPos))
+        return dict(
+            state_observation=flat_obs,
+            state_desired_goal=self._state_goal,
+            state_achieved_goal=objPos,
+        )
