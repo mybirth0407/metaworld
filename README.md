@@ -28,7 +28,7 @@ pip install git+https://github.com/rlworkgroup/metaworld.git@master#egg=metaworl
 Alternatively, you can clone the repository and install an editable version locally:
 
 ```
-git clone https://github.com/rlworkgroup/metaworld.git
+git clone https://github.com/mybirth0407/metaworld.git
 cd metaworld
 pip install -e .
 ```
